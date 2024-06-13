@@ -50,10 +50,9 @@ DisplayName | SamAccountName | Prefix | Pwned | Duplicate | SamePwdAs
 Production Line 4 | pline4 | B862A | False | True | CN=Production Line 5,OU=Generic accounts,DC=domain,DC=com<br>CN=Production Line 6,OU=Generic accounts,DC=domain,DC=com
 Production Line 5 | pline5 | B862A | False | True | CN=Production Line 4,OU=Generic accounts,DC=domain,DC=com<br>CN=Production Line 6,OU=Generic accounts,DC=domain,DC=com
 Production Line 6 | pline6 | B862A | False | True | CN=Production Line 4,OU=Generic accounts,DC=domain,DC=com<br>CN=Production Line 5,OU=Generic accounts,DC=domain,DC=com
-John Smith | jsmith | F56A0 | True | False | 
+John Smith | jsmith | F56A0 | True | False |
 Jane Doe | jdoe | 1A98E | False | True | CN=Jane Doe (ADMIN),OU=Administrators,DC=domain,DC=com
 Jane Doe (ADMIN) | jdoe_admin | 1A98E | False | True | CN=Jane Doe,OU=Employees,DC=domain,DC=com
-
 
 Here's how to read the results:
 
@@ -70,9 +69,17 @@ Duplicate=False | ✔️ Good news! This user uses a password that is unique in 
 
 Pretty simple: the same string will always generate the same hash. For example, the NTLM hash for *p@ssw0rd* will always be *DE26CCE0356891A4A020E7C4957AFC72*. Knowing this, the script simply checks whether the hash appears more than once in the domain.
 
-### How does the script check if the password isn't safe?
+### Is it possible to audit password length with this script?
+
+Nope we can't (and that's a good thing)! The hash of a 1-character password will be the same length as the hash of a 128-characters password.
+
+### How does the script check if the password isn't safe then?
 
 This script uses an [API from Have I Been Pwned?](https://haveibeenpwned.com/API#PwnedPasswords) to check if the NTLM hash as been exposed in previous data breaches. There is hundreds of millions of hashes available. If a NTML hash is found in this list, it means that the password isn't secure anymore.
+
+### What do you means by "not secure anymore"?
+
+It means that the NTML hash is known and if anyone get the hash, it will be able to retreive the clear-text password using a website like [hashes.com](https://hashes.com/en/decrypt/hash) for example.
 
 ### Wait, are you sending NTML hash to some random website?
 
