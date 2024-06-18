@@ -15,10 +15,17 @@ param(
     [Parameter(ParameterSetName = 'Duplicate')]
     [switch]$SkipDuplicate,
 
-    [System.IO.DirectoryInfo]$LogPath = $PSScriptRoot,
+    [System.IO.DirectoryInfo]$LogPath = "$PSScriptRoot\logs",
 
-    [System.IO.DirectoryInfo]$OutputPath = $PSScriptRoot
+    [System.IO.DirectoryInfo]$OutputPath = "$PSScriptRoot\output"
 )
+
+# Create logs & output folders if needed
+'LogPath','OutputPath' | ForEach-Object {
+    if (!(Test-Path -Path (Get-Variable $_ -ValueOnly).FullName -PathType Container)) {
+        $null = New-Item -Path (Get-Variable $_ -ValueOnly).FullName -ItemType Directory
+    }
+}
 
 # Start transcript
 Start-Transcript -Path "$LogPath\NTDSPasswordChecker_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').log"
@@ -73,7 +80,7 @@ if (!$SkipDuplicate.IsPresent) {
             $_.SamePwdAs += $samePwdAs | Select-Object DisplayName, SamAccountName, DistinguishedName
         }
 
-        # Display the proportion
+        # Show results
         $duplicateCount = ($users | Where-Object { $_.Duplicate -eq $true } | Measure-Object).Count
         Write-Host "$duplicateCount accounts are using a non-unique password [$([Math]::Round(($duplicateCount/$userCount*100),2))%]"
 
@@ -121,10 +128,21 @@ if (!$SkipPwned.IsPresent) {
         # Check if users are concerned by a pwned password
         $users.GetEnumerator().Where({ $_.Prefix -eq $prefix -and $_.NTHash -in $pwnedPasswords }) | ForEach-Object { $_.Pwned = $true }
     }
+
+    # Show results
+    $pwnedCount = ($users | Where-Object { $_.Pwned -eq $true } | Measure-Object).Count
+    if ($pwnedCount -gt 0) {
+        Write-Host "$pwnedCount accounts are using a unsecure password [$([Math]::Round(($pwnedCount/$total*100),2))%]"
+        Write-Host "List of accounts with pwned password:"
+        $users | Where-Object {$_.Pwned -eq $true} | Select-Object DisplayName, Prefix, DistinguishedName | Sort-Object Prefix | Format-Table -AutoSize
+    }
+    else {
+        Write-Host "Good news! None of the password are pwned" -ForegroundColor Green
+    }
 }
 
 # Export CSV
 $users | Select-Object *,@{N='SamePasswordAs';E={$_.SamePwdAs.DisplayName -join ', '}} -ExcludeProperty SamePwdAs,NTHash |
-    Export-Csv -Path "$logPath\NTDSPasswordChecker_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').csv" -Delimiter ';' -Encoding UTF8 -NoTypeInformation
+    Export-Csv -Path "$OutputPath\NTDSPasswordChecker_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').csv" -Delimiter ';' -Encoding UTF8 -NoTypeInformation
 
-Stop-Transcript
+Stop-Transcripts

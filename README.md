@@ -1,12 +1,12 @@
 # NTDSPasswordChecker
 
-Check if Active Directory passwords are reused or pwned within your domain using NTDS.dit file.
+Check if Active Directory passwords are reused and/or pwned using NTDS.dit file.
 
-## How does it works?
+## Quick start guide
 
 ### Extracting NTDS.dit file
 
-This script uses an offline copy of the NTDS.dit file, which means that you'll have to extract it from a Domain Controller using `ntdsutils.exe`:
+This script uses an offline copy of the NTDS.dit file, which means that you'll have to extract it from a domain controller using `ntdsutils.exe` with a domain admin account:
 
 ```plaintext
 C:\> ntdsutils.exe
@@ -27,9 +27,9 @@ The "C:\temp" folder will now contains the following folders and files:
     📄 SYSTEM
 ```
 
-Please treat the "NTDS" folder with all the seriousness that it needs, since it contains a copy of your Active Directory environment (with all user passwords).
+Please treat this NTDS folder with all the seriousness that it needs, since it contains a copy of your Active Directory environment (including passwords).
 
-### Run the script
+### Install DSInternals module
 
 The script needs the [DSInternals](https://github.com/MichaelGrafnetter/DSInternals) PowerShell module, which you can install this way:
 
@@ -37,31 +37,35 @@ The script needs the [DSInternals](https://github.com/MichaelGrafnetter/DSIntern
 Install-Module DSInternals
 ```
 
-Then you can simply execute the script like this:
+### Run the script
+
+You must run the script as administrator:
 
 ```powershell
 .\script.ps1 -NTDSPath 'C:\temp\ntds'
 ```
 
+## Output
+
 ### Results
 
 DisplayName | SamAccountName | Prefix | Pwned | Duplicate | SamePwdAs
 ----------- | -------------- | ------ | ----- | --------- | ---------
-Production Line 4 | pline4 | B862A | False | True | CN=Production Line 5,OU=Generic accounts,DC=domain,DC=com<br>CN=Production Line 6,OU=Generic accounts,DC=domain,DC=com
-Production Line 5 | pline5 | B862A | False | True | CN=Production Line 4,OU=Generic accounts,DC=domain,DC=com<br>CN=Production Line 6,OU=Generic accounts,DC=domain,DC=com
-Production Line 6 | pline6 | B862A | False | True | CN=Production Line 4,OU=Generic accounts,DC=domain,DC=com<br>CN=Production Line 5,OU=Generic accounts,DC=domain,DC=com
+Production Line 4 | pline4 | B862A | False | True | Production Line 5, Production Line 6
+Production Line 5 | pline5 | B862A | False | True | Production Line 4, Production Line 6
+Production Line 6 | pline6 | B862A | False | True | Production Line 4, Production Line 5
 John Smith | jsmith | F56A0 | True | False |
-Jane Doe | jdoe | 1A98E | False | True | CN=Jane Doe (ADMIN),OU=Administrators,DC=domain,DC=com
-Jane Doe (ADMIN) | jdoe_admin | 1A98E | False | True | CN=Jane Doe,OU=Employees,DC=domain,DC=com
+Jane Doe | jdoe | 1A98E | False | True | Jane Doe (ADMIN)
+Jane Doe (ADMIN) | jdoe_admin | 1A98E | False | True | Jane Doe
 
 Here's how to read the results:
 
 Results | Description
 ------- | -----------
-Pwned=True | 🚩 Bad news! The hash has been found in data breaches and is vulnerable.
-Pwned=False | ✔️ Good news! The hash has been found in known data breaches.
-Duplicate=True | 🚩 Bad news! Someone else in this domain is using the same password.
-Duplicate=False | ✔️ Good news! This user uses a password that is unique in the domain.
+Pwned=True | 🚩 Bad news! The hash is known and can be reversed
+Pwned=False | ✔️ Good news! The hash isn't known and can't be reversed
+Duplicate=True | 🚩 Bad news! Someone else is using the same password
+Duplicate=False | ✔️ Good news! This user uses a password that is unique
 
 ## Legitimate questions
 
@@ -81,9 +85,9 @@ This script uses an [API from Have I Been Pwned?](https://haveibeenpwned.com/API
 
 It means that the NTML hash is known and if anyone get the hash, it will be able to retreive the clear-text password using a website like [hashes.com](https://hashes.com/en/decrypt/hash) for example.
 
-### Wait, are you sending NTML hash to some random website?
+### Wait, are you sending my NTML hash to some random website?
 
-Sort of, but it isn't as bad as you think it is. The script send only the first five characters of the hash (which is about 15% of the total length) and then receive the list of all exposed hash that starts with those five characters.
+Sort of, but it isn't as bad as you think. The script send only the first five characters of the hash (which is about 15% of the total length) and then receive the list of all exposed hash that starts with those five characters.
 
 For example, if I want to test the hash *DE26CCE0356891A4A020E7C4957AFC72*, I will send *DE26C* to the API and then receive a list of +800 hash to check.
 
