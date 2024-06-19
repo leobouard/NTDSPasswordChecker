@@ -129,6 +129,7 @@ if (!$SkipPwdResetAbuse.IsPresent) {
 if (!$SkipPwned.IsPresent) {
     # Add new property
     $users | Add-Member -MemberType NoteProperty -Name 'Pwned' -Value $false
+    $users | Add-Member -MemberType NoteProperty -Name 'Exposure' -Value 0
     
     # Prepare progress bar
     $prefixes = $users.Prefix | Sort-Object -Unique
@@ -145,10 +146,19 @@ if (!$SkipPwned.IsPresent) {
     
         # Get pwned passwords
         $pwnedPasswords = Invoke-RestMethod -Method GET -Uri "https://api.pwnedpasswords.com/range/$prefix`?mode=ntlm"
-        $pwnedPasswords = $pwnedPasswords -split "`n" | ForEach-Object { $prefix + ($_ -split ':')[0] }
+        $pwnedPasswords = $pwnedPasswords -split "`n" | ForEach-Object {
+            [PSCustomObject]@{
+                NTHash   = $prefix + ($_ -split ':')[0]
+                Exposure = ($_ -split ':')[-1]
+            }
+        }
         
         # Check if users are concerned by a pwned password
-        $users.GetEnumerator().Where({ $_.Prefix -eq $prefix -and $_.NTHash -in $pwnedPasswords }) | ForEach-Object { $_.Pwned = $true }
+        $users.GetEnumerator().Where({ $_.Prefix -eq $prefix -and $_.NTHash -in $pwnedPasswords.NTHash }) | ForEach-Object {
+            $nthash = $_.NTHash
+            $_.Pwned = $true
+            $_.Exposure = ($pwnedPasswords | Where-Object { $_.NTHash -eq $nthash }).Exposure
+        }
     }
 
     # Show results
@@ -167,4 +177,4 @@ if (!$SkipPwned.IsPresent) {
 $users | Select-Object *, @{N = 'SamePasswordAs'; E = { $_.SamePwdAs.DisplayName -join ', ' } } -ExcludeProperty SamePwdAs, NTHash |
 Export-Csv -Path "$OutputPath\NTDSPasswordChecker_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').csv" -Delimiter ';' -Encoding UTF8 -NoTypeInformation
 
-Stop-Transcripts
+Stop-Transcript
