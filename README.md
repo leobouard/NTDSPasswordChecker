@@ -83,17 +83,32 @@ This script uses an [API from Have I Been Pwned?](https://haveibeenpwned.com/API
 
 ### What do you means by "not secure anymore"?
 
-It means that the NTML hash is known and if anyone get the hash, it will be able to retreive the clear-text password using a website like [hashes.com](https://hashes.com/en/decrypt/hash) for example.
+It means that the NTML hash is known and if anyone get the hash, it will be able to retreive the clear-text password using a website like [ntlm.pw](https://ntlm.pw/), [crackstation.net](https://crackstation.net/) or [hashes.com](https://hashes.com/en/decrypt/hash) for example.
 
 ### Wait, are you sending my NTML hash to some random website?
 
 Sort of, but it isn't as bad as you think. The script send only the first five characters of the hash (which is about 15% of the total length) and then receive the list of all exposed hash that starts with those five characters.
 
-For example, if I want to test the hash *DE26CCE0356891A4A020E7C4957AFC72*, I will send *DE26C* to the API and then receive a list of +800 hash to check.
+For example, if I want to test the hash *DE26CCE0356891A4A020E7C4957AFC72*, I will send *DE26C* to the API and then receive a list of +800 compromised hash to check.
+
+### And what happens if someone intercepts my API call?
+
+Let's say you are making this API call: <https://api.pwnedpasswords.com/range/DE26C?mode=ntlm>
+
+Well, if someone intercept this API call and:
+
+- trace your IP address
+- locate your company
+
+Then he will know that one or multiple accounts in your Active Directory have a NTLM hash that starts with "DE26C".
+
+And since 27 characters remains unknown, it leaves about 16²⁷ possibilites for the hash.
+
+But at the end of the day, the choice is yours. If you don't want to use this API, you can simply use the `-SkipPwned` parameter.
 
 ### Is it possible to do this offline?
 
-I haven't started working on this, but I don't think it can be done offline only using PowerShell. You can download the PwnedPasswords database using [PwnedPasswordsDownloader \| GitHub](https://github.com/HaveIBeenPwned/PwnedPasswordsDownloader) but I'm pretty sure PowerShell won't be able to parse a +1B row text file.
+I haven't started working on this, but I don't think it can be done offline only using PowerShell. You can download the PwnedPasswords database using [PwnedPasswordsDownloader \| GitHub](https://github.com/HaveIBeenPwned/PwnedPasswordsDownloader) if needed.
 
 ## Useful work
 
