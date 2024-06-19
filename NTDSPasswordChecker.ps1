@@ -12,6 +12,9 @@ param(
     [Parameter(ParameterSetName = 'Pwned')]
     [switch]$SkipPwned,
 
+    [Parameter(ParameterSetName = 'PwdResetAbuse')]
+    [switch]$SkipPwdResetAbuse,
+
     [Parameter(ParameterSetName = 'Duplicate')]
     [switch]$SkipDuplicate,
 
@@ -21,7 +24,7 @@ param(
 )
 
 # Create logs & output folders if needed
-'LogPath','OutputPath' | ForEach-Object {
+'LogPath', 'OutputPath' | ForEach-Object {
     if (!(Test-Path -Path (Get-Variable $_ -ValueOnly).FullName -PathType Container)) {
         $null = New-Item -Path (Get-Variable $_ -ValueOnly).FullName -ItemType Directory
     }
@@ -44,10 +47,13 @@ if ($SearchBase) {
 # Create a simple PSObject
 $users = $addbaccounts | Where-Object { $_.NTHash -and $_.SamAccountType -eq 'user' -and $_.Enabled -eq $true } | Sort-Object NTHash | ForEach-Object {
     $nthash = ($_.NTHash | ConvertTo-Hex -UpperCase) -join ''
+    $nthashHistory = if ($_.NTHashHistory) { $_.NTHashHistory | ForEach-Object { ($_ | ConvertTo-Hex -UpperCase) -join '' } } else { $null }
+
     [PSCustomObject]@{
         DisplayName       = $_.DisplayName
         SamAccountName    = $_.SamAccountName
         NTHash            = $nthash
+        NTHashHistory     = $nthashHistory
         Prefix            = $nthash.Substring(0, 5)
         IsAdministrator   = $_.AdminCount
         DistinguishedName = $_.DistinguishedName
@@ -103,6 +109,22 @@ if (!$SkipDuplicate.IsPresent) {
     }
 }
 
+# Search for password reset abuse
+if (!$SkipPwdResetAbuse.IsPresent) {
+    $users | Add-Member -MemberType NoteProperty -Name 'PwdResetAbuse' -Value 0
+    $users | Add-Member -MemberType NoteProperty -Name 'PrefixHistory' -Value $null
+    $users | Where-Object { ($_.NTHashHistory | Measure-Object).Count -ne ($_.NTHashHistory | Sort-Object -Unique | Measure-Object).Count } | ForEach-Object {
+        $ntHashHistoryCount = ($_.NTHashHistory | Measure-Object).Count
+        $ntHashHistoryUniqueCount = ($_.NTHashHistory | Sort-Object -Unique | Measure-Object).Count
+        $_.PwdResetAbuse = $ntHashHistoryCount - $ntHashHistoryUniqueCount
+        $_.PrefixHistory = $_.NTHashHistory | Sort-Object | ForEach-Object { $_.SubString(0, 5) }
+    }
+
+    # Display accounts with the most PwdResetAbuse
+    Write-Host "List of the users with the most password reset abuse:"
+    $users | Sort-Object PwdResetAbuse -Descending | Select-Object -First 5 | Format-Table DisplayName, PrefixHistory, PwdResetAbuse -AutoSize
+}
+
 # Search for pwned passwords
 if (!$SkipPwned.IsPresent) {
     # Add new property
@@ -134,7 +156,7 @@ if (!$SkipPwned.IsPresent) {
     if ($pwnedCount -gt 0) {
         Write-Host "$pwnedCount accounts are using a unsecure password [$([Math]::Round(($pwnedCount/$total*100),2))%]"
         Write-Host "List of accounts with pwned password:"
-        $users | Where-Object {$_.Pwned -eq $true} | Select-Object DisplayName, Prefix, DistinguishedName | Sort-Object Prefix | Format-Table -AutoSize
+        $users | Where-Object { $_.Pwned -eq $true } | Select-Object DisplayName, Prefix, DistinguishedName | Sort-Object Prefix | Format-Table -AutoSize
     }
     else {
         Write-Host "Good news! None of the password are pwned" -ForegroundColor Green
@@ -142,7 +164,7 @@ if (!$SkipPwned.IsPresent) {
 }
 
 # Export CSV
-$users | Select-Object *,@{N='SamePasswordAs';E={$_.SamePwdAs.DisplayName -join ', '}} -ExcludeProperty SamePwdAs,NTHash |
-    Export-Csv -Path "$OutputPath\NTDSPasswordChecker_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').csv" -Delimiter ';' -Encoding UTF8 -NoTypeInformation
+$users | Select-Object *, @{N = 'SamePasswordAs'; E = { $_.SamePwdAs.DisplayName -join ', ' } } -ExcludeProperty SamePwdAs, NTHash |
+Export-Csv -Path "$OutputPath\NTDSPasswordChecker_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').csv" -Delimiter ';' -Encoding UTF8 -NoTypeInformation
 
 Stop-Transcripts
