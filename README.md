@@ -110,6 +110,16 @@ But at the end of the day, the choice is yours. If you don't want to use this AP
 
 I haven't started working on this, but I don't think it can be done offline only using PowerShell. You can download the PwnedPasswords database using [PwnedPasswordsDownloader \| GitHub](https://github.com/HaveIBeenPwned/PwnedPasswordsDownloader) if needed.
 
+## Roadmap
+
+- [x] Audit duplicate NTLM hash
+- [x] Audit pwned password using HaveIBeenPwned? API
+- [x] Audit password reset abuse
+- [ ] Add decoy API calls
+- [ ] Add custom password list
+- [ ] Add offline methods to get pwned passwords
+- [ ] Add a cool ASCII-art banner
+
 ## Useful work
 
 This script would probably doesn't exist without [PassTester by Elymaro \| GitHub](https://github.com/Elymaro/PassTester) so go check it out. 👍
