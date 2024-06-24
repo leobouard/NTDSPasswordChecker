@@ -2,32 +2,33 @@
 #Requires -Version 5.1
 #Requires -Modules @{ModuleName='DSInternals';ModuleVersion='4.14'}
 
-[CmdletBinding(DefaultParameterSetName = 'Pwned')]
+[CmdletBinding(DefaultParameterSetName = 'All')]
 param(
     [Parameter(Mandatory)]
     [System.IO.DirectoryInfo]$NTDSPath,
 
     [string]$SearchBase,
 
+    [Parameter(ParameterSetName = 'All')]
+    [switch]$All,
+
+    [Parameter(ParameterSetName = 'Select')]
     [Parameter(ParameterSetName = 'Pwned')]
-    [switch]$SkipPwned,
+    [switch]$Pwned,
 
-    [Parameter(ParameterSetName = 'PwdResetAbuse')]
-    [switch]$SkipPwdResetAbuse,
+    [Parameter(ParameterSetName = 'Pwned')]
+    [switch]$FindPlainTextPwd,
 
-    [Parameter(ParameterSetName = 'Duplicate')]
-    [switch]$SkipDuplicate,
+    [Parameter(ParameterSetName = 'Select')]
+    [switch]$PwdResetAbuse,
+
+    [Parameter(ParameterSetName = 'Select')]
+    [switch]$Duplicate,
 
     [System.IO.DirectoryInfo]$LogPath = "$PSScriptRoot\logs",
 
     [System.IO.DirectoryInfo]$OutputPath = "$PSScriptRoot\output"
 )
-
-function New-Decoy {
-    $random = Get-Random -Minimum 0 -Maximum 1048576
-    $hex = ([System.BitConverter]::GetBytes($random) | ConvertTo-Hex -UpperCase) -join ''
-    $hex.Substring(0,5)
-}
 
 # Create logs & output folders if needed
 'LogPath', 'OutputPath' | ForEach-Object {
@@ -39,101 +40,88 @@ function New-Decoy {
 # Start transcript
 Start-Transcript -Path "$LogPath\NTDSPasswordChecker_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').log"
 
+# Import module
+Import-Module "$PSScriptRoot\NTDSPasswordChecker.psm1"
+
 # Extracting NTDS base
 Write-Host "Extracting all accounts from NTDS base at path '$NTDSPath'"
 $bootkey = Get-BootKey -SystemHiveFilePath "$NTDSPath\registry\SYSTEM"
 $addbaccounts = Get-ADDBAccount -All -BootKey $bootkey -DatabasePath "$NTDSPath\Active Directory\ntds.dit"
 
-# Reducing results to a searchbase
-if ($SearchBase) {
-    Write-Host "Reducing results to the searchbase '$SearchBase'"
-    $addbaccounts = $addbaccounts | Where-Object { $_.DistinguishedName -like "*$SearchBase" }
-}
-
 # Create a simple PSObject
-$users = $addbaccounts | Where-Object { $_.NTHash -and $_.SamAccountType -eq 'user' -and $_.Enabled -eq $true } | Sort-Object NTHash | ForEach-Object {
-    $nthash = ($_.NTHash | ConvertTo-Hex -UpperCase) -join ''
-    $nthashHistory = if ($_.NTHashHistory) { $_.NTHashHistory | ForEach-Object { ($_ | ConvertTo-Hex -UpperCase) -join '' } } else { $null }
-
-    [PSCustomObject]@{
-        DisplayName       = $_.DisplayName
-        SamAccountName    = $_.SamAccountName
-        NTHash            = $nthash
-        NTHashHistory     = $nthashHistory
-        Prefix            = $nthash.Substring(0, 5)
-        IsAdministrator   = $_.AdminCount
-        DistinguishedName = $_.DistinguishedName
-    }
-}
+$users = Format-ADDBAccount -ADDBAccounts $addbaccounts -SearchBase $SearchBase
 $userCount = ($users | Measure-Object).Count
 Write-Host "Users count: $userCount"
 
-# Search for duplicate passwords
-if (!$SkipDuplicate.IsPresent) {
+# Duplicate passwords
+if ($All.IsPresent -or $Duplicate.IsPresent) {
+
     # Add new properties
     $users | Add-Member -MemberType NoteProperty -Name 'Duplicate' -Value $false
+    $users | Add-Member -MemberType NoteProperty -Name 'DuplicateCount' -Value 0
     $users | Add-Member -MemberType NoteProperty -Name 'SamePwdAs' -Value @()
 
     # Find unique and non-unique hash
-    Write-Host "Searching for hash that appears more than once in the current searchbase"
-    $uniqueNTHash = $users.NTHash | Sort-Object -Unique
-    Write-Host "$(($uniqueNTHash | Measure-Object).Count) unique hash found!"
-    $nonUniqueNTHash = (Compare-Object -ReferenceObject $uniqueNTHash -DifferenceObject $users.NTHash).InputObject
-    Write-Host "$(($nonUniqueNTHash | Measure-Object).Count) non-unique hash found!"
+    $nonUniqueNTHash = Find-NonUniqueNTHash -NTHash $users.NTHash
 
-    if ($nonUniqueNTHash -gt 0) {
-        # Update the new properties
-        $users | Where-Object { $_.NTHash -in $nonUniqueNTHash } | ForEach-Object {
-            Write-Progress -Activity 'Update information about non-unique hash' -Status "Processing: $($_.SamAccountName)"
-            $nthash = $_.NTHash
-            $dn = $_.DistinguishedName
-            $samePwdAs = $users.GetEnumerator().Where({ $_.NTHash -eq $nthash -and $_.DistinguishedName -ne $dn })
-            $_.Duplicate = $true
-            $_.SamePwdAs += $samePwdAs | Select-Object DisplayName, SamAccountName, DistinguishedName
-        }
-
-        # Show results
-        $duplicateCount = ($users | Where-Object { $_.Duplicate -eq $true } | Measure-Object).Count
-        Write-Host "$duplicateCount accounts are using a non-unique password [$([Math]::Round(($duplicateCount/$userCount*100),2))%]"
-
-        # Display the most common hash
-        $groupByNTHash = $users | Where-Object { $_.Duplicate -eq $true } | Group-Object Prefix | Sort-Object Count -Descending
-        if ($groupByNTHash) {
-            Write-Host "List of the most common hash:"
-            $groupByNTHash | Select-Object -First 10 -Property Count, Name, @{N = 'DisplayName'; E = { $_.Group.DisplayName } } | Format-Table -AutoSize
-        }
-        
-        # Display if administrators uses a non-unique password
-        $adminWithNonUniqueNTHash = $users | Where-Object { $_.Duplicate -eq $true -and $_.IsAdministrator -eq $true }
-        if ($adminWithNonUniqueNTHash) {
-            Write-Host "List of administrators with a non-unique password:"
-            $adminWithNonUniqueNTHash | Select-Object DisplayName, Prefix, @{N = 'SamePasswordAs'; E = { $_.SamePwdAs.DisplayName } } | Format-Table -AutoSize
-        }
+    # Update properties
+    $users | Where-Object { $_.NTHash -in $nonUniqueNTHash } | ForEach-Object {
+        Write-Progress -Activity 'Update information about non-unique hash' -Status "Processing: $($_.SamAccountName)"
+        $nthash = $_.NTHash
+        $dn = $_.DistinguishedName
+        $samePwdAs = $users.GetEnumerator().Where({ $_.NTHash -eq $nthash -and $_.DistinguishedName -ne $dn })
+        $_.Duplicate = $true
+        $_.DuplicateCount = ($samePwdAs | Measure-Object).Count
+        $_.SamePwdAs += $samePwdAs | Select-Object DisplayName, SamAccountName, DistinguishedName
     }
-    else {
-        Write-Host "Good news! All password are unique" -ForegroundColor Green
-    }
+
+    # Show results
+    $duplicateCount = ($users | Where-Object { $_.Duplicate -eq $true } | Measure-Object).Count
+    Write-Host "$duplicateCount accounts are using a non-unique password [$([Math]::Round(($duplicateCount/$userCount*100),2))%]"
+
+    # Display the most common hash
+    $groupByNTHash = $users | Where-Object { $_.Duplicate -eq $true } | Group-Object Prefix | Sort-Object Count -Descending
+    Write-Host "List of the most common hash:"
+    $groupByNTHash | Select-Object -First 10 -Property Count, Name, @{N = 'DisplayName'; E = { $_.Group.DisplayName } } | Format-Table -AutoSize
+    
+    # Display if administrators uses a non-unique password
+    $adminWithNonUniqueNTHash = $users | Where-Object { $_.Duplicate -eq $true -and $_.IsAdministrator -eq $true }
+    Write-Host "List of administrators with a non-unique password:"
+    $adminWithNonUniqueNTHash | Select-Object DisplayName, Prefix, @{N = 'SamePasswordAs'; E = { $_.SamePwdAs.DisplayName } } | Format-Table -AutoSize
+
+    # Export results to CSV
 }
 
-# Search for password reset abuse
-if (!$SkipPwdResetAbuse.IsPresent) {
+# Password reset abuse
+if ($All.IsPresent -or $PwdResetAbuse.IsPresent) {
+
+    # Add new properties
     $users | Add-Member -MemberType NoteProperty -Name 'PwdResetAbuse' -Value 0
     $users | Add-Member -MemberType NoteProperty -Name 'PrefixHistory' -Value $null
+
+    # Update properties
     $users | Where-Object { ($_.NTHashHistory | Measure-Object).Count -ne ($_.NTHashHistory | Sort-Object -Unique | Measure-Object).Count } | ForEach-Object {
         $ntHashHistoryCount = ($_.NTHashHistory | Measure-Object).Count
         $ntHashHistoryUniqueCount = ($_.NTHashHistory | Sort-Object -Unique | Measure-Object).Count
-        $_.PwdResetAbuse = $ntHashHistoryCount - $ntHashHistoryUniqueCount
-        $_.PrefixHistory = $_.NTHashHistory | Sort-Object | ForEach-Object { $_.SubString(0, 5) }
+        $_.PwdResetAbuse = [math]::Round(($ntHashHistoryCount - $ntHashHistoryUniqueCount) / $ntHashHistoryCount, 2)
+        $_.PrefixHistory = $_.NTHashHistory | ForEach-Object { $_.SubString(0, 5) }
     }
-
+    
     # Display accounts with the most PwdResetAbuse
     Write-Host "List of the users with the most password reset abuse:"
-    $users | Sort-Object PwdResetAbuse -Descending | Select-Object -First 5 | Format-Table DisplayName, PrefixHistory, PwdResetAbuse -AutoSize
+    $users | Sort-Object PwdResetAbuse -Descending | Select-Object -First 10 | Format-Table DisplayName, PrefixHistory, PwdResetAbuse -AutoSize
+
+    # Display administrators with PwdResetAbuse
+    Write-Host "List of the administrators with password reset abuse:"
+    $users | Where-Object { $_.IsAdministrator -eq $true -and $_.PwdResetAbuse -gt 0 } | Sort-Object PwdResetAbuse -Descending | Format-Table DisplayName, PrefixHistory, PwdResetAbuse -AutoSize
+
+    # Export results to CSV
 }
 
-# Search for pwned passwords
-if (!$SkipPwned.IsPresent) {
-    # Add new property
+# Pwned passwords
+if ($All.IsPresent -or $Pwned.IsPresent) {
+
+    # Add new properties
     $users | Add-Member -MemberType NoteProperty -Name 'Pwned' -Value $false
     $users | Add-Member -MemberType NoteProperty -Name 'Exposure' -Value 0
     
@@ -151,13 +139,7 @@ if (!$SkipPwned.IsPresent) {
         $i++
     
         # Get pwned passwords
-        $pwnedPasswords = Invoke-RestMethod -Method GET -Uri "https://api.pwnedpasswords.com/range/$prefix`?mode=ntlm"
-        $pwnedPasswords = $pwnedPasswords -split "`n" | ForEach-Object {
-            [PSCustomObject]@{
-                NTHash   = $prefix + ($_ -split ':')[0]
-                Exposure = ($_ -split ':')[-1]
-            }
-        }
+        $pwnedPasswords = Get-PwnedNTHashList -Prefix $Prefix
         
         # Check if users are concerned by a pwned password
         $users.GetEnumerator().Where({ $_.Prefix -eq $prefix -and $_.NTHash -in $pwnedPasswords.NTHash }) | ForEach-Object {
@@ -169,18 +151,32 @@ if (!$SkipPwned.IsPresent) {
 
     # Show results
     $pwnedCount = ($users | Where-Object { $_.Pwned -eq $true } | Measure-Object).Count
-    if ($pwnedCount -gt 0) {
-        Write-Host "$pwnedCount accounts are using a unsecure password [$([Math]::Round(($pwnedCount/$total*100),2))%]"
-        Write-Host "List of accounts with pwned password:"
-        $users | Where-Object { $_.Pwned -eq $true } | Select-Object DisplayName, Prefix, DistinguishedName | Sort-Object Prefix | Format-Table -AutoSize
-    }
-    else {
-        Write-Host "Good news! None of the password are pwned" -ForegroundColor Green
-    }
+    Write-Host "$pwnedCount accounts are using a unsecure password [$([Math]::Round(($pwnedCount/$total*100),2))%]"
+    Write-Host "List of accounts with pwned password:"
+    $users | Where-Object { $_.Pwned -eq $true } | Select-Object DisplayName, Prefix, DistinguishedName | Sort-Object Prefix | Format-Table -AutoSize
+
+    # Export results to CSV
 }
 
-# Export CSV
-$users | Select-Object *, @{N = 'SamePasswordAs'; E = { $_.SamePwdAs.DisplayName -join ', ' } } -ExcludeProperty SamePwdAs, NTHash |
-Export-Csv -Path "$OutputPath\NTDSPasswordChecker_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').csv" -Delimiter ';' -Encoding UTF8 -NoTypeInformation
+# Plain text passwords
+if ($Pwned.IsPresent -and $FindPlainTextPwd.IsPresent) {
+
+    # Add new property
+    $users | Add-Member -MemberType NoteProperty -Name 'PlainTextPwd' -Value ''
+
+    # Get plain text password from API
+    $plainTextPwd = Convert-NTHashToPlainTextPassword -NTHash ($users | Where-Object {$_.Pwned -eq $true}).NTHash
+
+    # Add plain text password
+    $plainTextPwd | Where-Object {$_.password} | ForEach-Object {
+        $item = $_
+        $users | Where-Object {$_.NTHash -eq $item.hash} | ForEach-Object {
+            $_.PlainTextPwd = $item.password
+        }
+    }
+
+    # Export results to CSV
+
+}
 
 Stop-Transcript
