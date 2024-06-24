@@ -23,6 +23,12 @@ param(
     [System.IO.DirectoryInfo]$OutputPath = "$PSScriptRoot\output"
 )
 
+function New-Decoy {
+    $random = Get-Random -Minimum 0 -Maximum 1048576
+    $hex = ([System.BitConverter]::GetBytes($random) | ConvertTo-Hex -UpperCase) -join ''
+    $hex.Substring(0,5)
+}
+
 # Create logs & output folders if needed
 'LogPath', 'OutputPath' | ForEach-Object {
     if (!(Test-Path -Path (Get-Variable $_ -ValueOnly).FullName -PathType Container)) {
