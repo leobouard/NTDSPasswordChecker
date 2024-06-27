@@ -45,8 +45,9 @@ Import-Module "$PSScriptRoot\NTDSPasswordChecker.psm1"
 
 # Extracting NTDS base
 Write-Host "Extracting all accounts from NTDS base at path '$NTDSPath'"
-$bootkey = Get-BootKey -SystemHiveFilePath "$NTDSPath\registry\SYSTEM"
-$addbaccounts = Get-ADDBAccount -All -BootKey $bootkey -DatabasePath "$NTDSPath\Active Directory\ntds.dit"
+$NTDSfiles = Get-ChildItem -Path C:\temp\NTDS -Recurse
+$bootkey = Get-BootKey -SystemHiveFilePath ($NTDSfiles | Where-Object {$_.Name -eq 'SYSTEM'})
+$addbaccounts = Get-ADDBAccount -All -BootKey $bootkey -DatabasePath ($NTDSfiles | Where-Object {$_.Name -eq 'NTDS.dit'})
 
 # Create a simple PSObject
 $users = Format-ADDBAccount -ADDBAccounts $addbaccounts -SearchBase $SearchBase
