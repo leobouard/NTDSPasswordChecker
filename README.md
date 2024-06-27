@@ -6,10 +6,10 @@ Check if Active Directory passwords are reused and/or pwned using NTDS.dit file.
 
 ### Extracting NTDS.dit file
 
-This script uses an offline copy of the NTDS.dit file, which means that you'll have to extract it from a domain controller using `ntdsutils.exe` with a domain admin account:
+This script uses an offline copy of the NTDS.dit file, which means that you'll have to extract it from a domain controller using `ntdsutil.exe` with a domain admin account:
 
 ```plaintext
-C:\> ntdsutils.exe
+C:\> ntdsutil.exe
 ntdsutil: activate instance ntds
 ntdsutil: IFM
 IFM: create full C:\temp\ntds
